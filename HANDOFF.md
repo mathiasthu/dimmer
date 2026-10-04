@@ -10,9 +10,11 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 - build-app.sh produces an ad-hoc signed bundle (`codesign -dv` ok).
 - Idle, without Accessibility permission (no overlay shown): CPU 0.0% for 60s, idle wakeups 0, `top` MEM 15M; `ps` RSS about 49 MB (counts shared system frameworks).
 
+- 2026-10-04 live test with Accessibility granted: Mathias confirmed dimming works and is smoother than HazeOver. First 30s sample while running: CPU 0.0% most samples, spikes 2-17% on switches, `top` MEM 24M, energy 0.0.
+
 ## NOT verified
-- Behaviour with Accessibility granted: overlay ordering, fades, multi-display, `_AXUIElementGetWindow` mapping, the bounds fallback, and CPU while actually dimming. Nothing was run with permission, by design.
-- install.sh has not been run. No launchd plist, no login item.
+- Multi-display and the bounds fallback were not tested specifically. No long (1h) CPU comparison against HazeOver yet.
+- No launchd plist; launch at login is the in-app SMAppService toggle.
 
 ## Known gaps
 - Stage Manager: grouped windows are not special-cased.
@@ -24,3 +26,9 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 ## Next
 - v2: per-app rules, global hotkey.
 - v3: focusbox timer + schedule hooks.
+
+## Public release (2026-10-04)
+- Repo is public at github.com/mathiasthu/dimmer, MIT licensed (Momentum Minds LLC). README links to Luxvps.
+- `scripts/build-app.sh` now builds a universal (arm64 + x86_64) binary and writes `dist/Dimmer.zip` (~66 KB) for GitHub Releases. Release: `gh release create vX.Y.Z dist/Dimmer.zip`.
+- Not notarized (no Apple Developer ID). README tells users to use Open Anyway or `xattr -dr com.apple.quarantine`. Notarization would need a paid developer account.
+- Reinstalling the ad-hoc build over ~/Applications/Dimmer.app may drop the Accessibility grant.
