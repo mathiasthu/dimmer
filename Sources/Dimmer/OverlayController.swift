@@ -1,5 +1,13 @@
 import AppKit
 
+/// The overlay covers every window behind the focused one. As a normal window it
+/// would count as a snapping target, so macOS stops snapping dragged or resized
+/// windows to the edges of neighbours hidden beneath it. Opting out through
+/// AppKit's private hook restores edge snapping (HazeOver does the same).
+private final class OverlayWindow: NSWindow {
+    @objc(_canBeSnappingTarget) var canBeSnappingTarget: Bool { false }
+}
+
 /// One borderless black window per screen. Its alpha is the dim intensity;
 /// it is ordered directly beneath the focused window in global z-order.
 final class OverlayController {
@@ -11,7 +19,7 @@ final class OverlayController {
     func rebuild() {
         windows.forEach { $0.orderOut(nil); $0.close() }
         windows = NSScreen.screens.map { screen in
-            let w = NSWindow(contentRect: screen.frame, styleMask: .borderless,
+            let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless,
                              backing: .buffered, defer: false)
             w.setFrame(screen.frame, display: false)
             w.backgroundColor = .black

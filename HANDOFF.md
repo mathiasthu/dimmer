@@ -17,6 +17,7 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 - No launchd plist; launch at login is the in-app SMAppService toggle.
 
 ## Known gaps
+- Fixed in 1.0.1: the overlay used to block window edge snapping (resize/drag no longer stopped at neighbouring windows). OverlayWindow overrides AppKit's private `_canBeSnappingTarget` to false, same as HazeOver's `NoSnapWindow`. Verified by Mathias 2026-10-04.
 - Stage Manager: grouped windows are not special-cased.
 - Full-screen Spaces: overlay uses `.fullScreenAuxiliary`/`.canJoinAllSpaces`, untested there.
 - Ad-hoc signing changes the code identity each build, so macOS may drop the Accessibility grant after a rebuild. v2 fix: create a self-signed code-signing cert and sign with it (not done; no keychain changes were made).
