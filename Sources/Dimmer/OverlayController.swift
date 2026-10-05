@@ -62,10 +62,17 @@ final class OverlayController {
     }
 
     /// Put the sheets directly below `windowID`, fading in or out per display.
-    func show(below windowID: CGWindowID, focusedDisplay: String? = nil, skipDisplay: String? = nil) {
+    /// `above` is another app's window still on top of `windowID` while its raise
+    /// is pending; the sheets go above it so they end up just below the focused app.
+    func show(below windowID: CGWindowID, above: CGWindowID? = nil,
+              focusedDisplay: String? = nil, skipDisplay: String? = nil) {
         for o in overlays {
             if wantsDim(o, focusedDisplay: focusedDisplay, skipDisplay: skipDisplay) {
-                o.window.order(.below, relativeTo: Int(windowID))
+                if let above {
+                    o.window.order(.above, relativeTo: Int(above))
+                } else {
+                    o.window.order(.below, relativeTo: Int(windowID))
+                }
                 if !o.dimmed {
                     o.dimmed = true
                     fade(o, to: Settings.intensity)
@@ -74,7 +81,7 @@ final class OverlayController {
                 dimOff(o, animated: true)
             }
         }
-        log.debug("show below \(windowID, privacy: .public) dimmed=\(self.overlays.map { $0.dimmed }, privacy: .public) onActiveSpace=\(self.overlays.map { $0.window.isOnActiveSpace }, privacy: .public) isVisible=\(self.overlays.map { $0.window.isVisible }, privacy: .public)")
+        log.debug("show below \(windowID, privacy: .public) above=\(above.map { Int($0) } ?? 0, privacy: .public) dimmed=\(self.overlays.map { $0.dimmed }, privacy: .public) onActiveSpace=\(self.overlays.map { $0.window.isOnActiveSpace }, privacy: .public) isVisible=\(self.overlays.map { $0.window.isVisible }, privacy: .public)")
     }
 
     func hide(animated: Bool = true) {

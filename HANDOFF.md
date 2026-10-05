@@ -22,7 +22,7 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 ## Known gaps
 - Fixed in 1.0.1: the overlay used to block window edge snapping (resize/drag no longer stopped at neighbouring windows). OverlayWindow overrides AppKit's private `_canBeSnappingTarget` to false, same as HazeOver's `NoSnapWindow`. Verified by Mathias 2026-10-04.
 - Stage Manager: grouped windows are not special-cased.
-- Full-screen Spaces: see "Full-screen fix" below (needs a live test).
+- Full-screen Spaces: see "Full-screen fix" below (live-tested 2026-10-05, see the Mac test section).
 - Ad-hoc signing changes the code identity each build, so macOS may drop the Accessibility grant after a rebuild. v2 fix: create a self-signed code-signing cert and sign with it (not done; no keychain changes were made).
 - Uses private `_AXUIElementGetWindow`; fallback matches pid + bounds.
 - Apps without AX support (some Electron/Java) report no focused window, so the screen is undimmed.
@@ -56,3 +56,18 @@ Bug reported by Mathias: putting a window into full screen made the overlay cove
 - Fix 2 (`FocusTracker.swift`): reads the focused window's `AXFullScreen` attribute. When it's true, that window's display is skipped (`show(..., skipDisplay:)`), so other displays still dim. If the display can't be resolved, every overlay is hidden rather than risk blacking out the full-screen window.
 - Trade-off: split-view full screen (two apps tiled) is not dimmed.
 - Written in a cloud session; it was not compiled. Next on the Mac: `scripts/build-app.sh`, re-grant Accessibility, then test entering and leaving full screen (green button and ctrl-cmd-F), swiping between a full-screen Space and the desktop, and full screen on one display with a second display attached.
+
+## Mac build and live test of the full-screen branch (2026-10-05)
+Built and run on the Mac with ARZOPA (main, 2048x1152) plus the built-in display attached, "Only the display with the focused window" on.
+- Build: `scripts/build-app.sh` succeeds with no Swift warnings (only the two known linker search-path lines). The cloud-written code compiled unchanged.
+- Verified live by Mathias: normal dimming (app switching incl. cmd-tab, move/resize, minimize, edge snapping); green-button full screen keeps the full-screen window bright; leaving full screen brings dimming back; focus moving between the two displays dims only the focused one.
+- Not tested (Mathias stopped testing once it worked): ctrl-cmd-F, swiping between a full-screen Space and the desktop, the per-display checkboxes, and full screen with "only focused display" off. The Displays submenu is still untested live.
+
+Two bugs found and fixed during the test:
+1. cmd-tab left the previous app's window bright. The app activates before the window server raises its windows, so `order(.below, relativeTo: focused)` put the overlay under the old front window too (z-order probe: `Terminal > Claude > Dimmer`). Probably present before this branch as well. Fix: `FocusTracker.windowAbove` finds the topmost other-app, layer-0 window still above the focused one (`CGWindowListCopyWindowInfo(.optionOnScreenAboveWindow)`); `OverlayController.show(below:above:)` then orders the overlay above that window, and the pending raise lifts the focused app over it. Logged as `above=<id>`; `above=0` means the normal path.
+2. For about 2.7 s after leaving full screen both displays went fully dark, and on entering full screen every overlay was hidden. CG has no entry for the window during the full-screen animation, so its display was unknown and the fallbacks (dim all / hide all) kicked in. Fix: the focused window's display is now resolved on every update and remembered per window (`lastDisplay`); when the lookup fails for the same window, the last known display is used. Logged as `display of <id> unresolved, using last known`. That log line didn't show up in the final run, so the fix is confirmed by Mathias's observation, not by the log.
+- Cost: the two window-list calls add about 1 ms per update (0.88 ms + 0.15 ms measured). Still no timers or polling.
+- Idle check: memory 23-28 MB. CPU 0.0% in quiet intervals, but both samples overlapped active use (spikes 3-30% on focus changes), so a clean idle CPU run is still open.
+- Testing gotchas: in zsh, `log` is a shell builtin, so run `/usr/bin/log stream ...`. The installed app is `~/Applications/Dimmer.app`; launching `dist/Dimmer.app` instead needs its own Accessibility grant.
+- Backups from this session: `~/dimmer-backups/` (previous installed app, pre-edit sources, HANDOFF).
+- Next: Mathias decides whether to merge PR #1 and release (bump to 1.1.1 or 1.2.0 in `scripts/Info.plist`).
