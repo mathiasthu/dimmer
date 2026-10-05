@@ -22,7 +22,7 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 ## Known gaps
 - Fixed in 1.0.1: the overlay used to block window edge snapping (resize/drag no longer stopped at neighbouring windows). OverlayWindow overrides AppKit's private `_canBeSnappingTarget` to false, same as HazeOver's `NoSnapWindow`. Verified by Mathias 2026-10-04.
 - Stage Manager: grouped windows are not special-cased.
-- Full-screen Spaces: overlay uses `.fullScreenAuxiliary`/`.canJoinAllSpaces`, untested there.
+- Full-screen Spaces: see "Full-screen fix" below (needs a live test).
 - Ad-hoc signing changes the code identity each build, so macOS may drop the Accessibility grant after a rebuild. v2 fix: create a self-signed code-signing cert and sign with it (not done; no keychain changes were made).
 - Uses private `_AXUIElementGetWindow`; fallback matches pid + bounds.
 - Apps without AX support (some Electron/Java) report no focused window, so the screen is undimmed.
@@ -48,3 +48,11 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 ## Incident 2026-10-04: dimming stopped (root cause unconfirmed)
 Dimming stopped working on Desktop 1 and did not follow focus after minimizing. A window-list probe showed the overlays ordered out and never shown again, although TCC showed Accessibility granted. After Mathias re-granted Accessibility and relaunched (build with debug logging), it worked again. Suspect: a stale Accessibility grant after an ad-hoc-signed reinstall. Not confirmed.
 - The os.Logger debug logging (`log` in OverlayController.swift, calls in FocusTracker and OverlayController) is intentional and stays in the release. If it recurs: `log stream --level debug --predicate 'subsystem == "com.mathiass.dimmer"'`.
+
+## Full-screen fix (2026-10-05, not yet built or live-tested)
+Bug reported by Mathias: putting a window into full screen made the overlay cover it, so the whole screen went dark, and it behaved erratically.
+- Cause: the overlay windows had `.fullScreenAuxiliary`, so they joined full-screen Spaces too, and could end up above the full-screen window during or after the transition.
+- Fix 1 (`OverlayController.swift`): removed `.fullScreenAuxiliary`. Overlays keep `.canJoinAllSpaces` for normal desktops but no longer appear on full-screen Spaces, where there is nothing to dim anyway.
+- Fix 2 (`FocusTracker.swift`): reads the focused window's `AXFullScreen` attribute. When it's true, that window's display is skipped (`show(..., skipDisplay:)`), so other displays still dim. If the display can't be resolved, every overlay is hidden rather than risk blacking out the full-screen window.
+- Trade-off: split-view full screen (two apps tiled) is not dimmed.
+- Written in a cloud session; it was not compiled. Next on the Mac: `scripts/build-app.sh`, re-grant Accessibility, then test entering and leaving full screen (green button and ctrl-cmd-F), swiping between a full-screen Space and the desktop, and full screen on one display with a second display attached.

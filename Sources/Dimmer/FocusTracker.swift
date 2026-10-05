@@ -100,16 +100,37 @@ final class FocusTracker {
         log.debug("update front=\(front?.localizedName ?? "-", privacy: .public) pid=\(front?.processIdentifier ?? 0, privacy: .public) observed=\(self.observedPID, privacy: .public)")
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != getpid(),
-              let id = focusedWindowID(pid: app.processIdentifier),
-              !overlay.windowNumbers.contains(Int(id)) else {
+              let win = focusedWindow(pid: app.processIdentifier),
+              !overlay.windowNumbers.contains(Int(win.id)) else {
             overlay.hide()
             return
         }
-        // Only look up the window's display when "focused display only" is on.
-        overlay.show(below: id, focusedDisplay: Settings.onlyFocusedDisplay ? Displays.uuid(ofWindow: id) : nil)
+        // Only look up the window's display when it's needed: "focused display
+        // only" is on, or the window is full screen and its display must stay clear.
+        let display = (Settings.onlyFocusedDisplay || win.fullScreen) ? Displays.uuid(ofWindow: win.id) : nil
+        if win.fullScreen && display == nil {
+            // Can't tell which display is full screen; never risk blacking it out.
+            log.debug("full-screen window \(win.id, privacy: .public) on unknown display")
+            overlay.hide()
+            return
+        }
+        overlay.show(below: win.id, focusedDisplay: Settings.onlyFocusedDisplay ? display : nil,
+                     skipDisplay: win.fullScreen ? display : nil)
     }
 
-    private func focusedWindowID(pid: pid_t) -> CGWindowID? {
+    private func focusedWindow(pid: pid_t) -> (id: CGWindowID, fullScreen: Bool)? {
+        guard let win = focusedWindowElement(pid: pid) else { return nil }
+        // "AXFullScreen" has no public constant but is set on full-screen windows.
+        var fs: CFTypeRef?
+        let fullScreen = AXUIElementCopyAttributeValue(win, "AXFullScreen" as CFString, &fs) == .success
+            && (fs as? Bool) == true
+
+        var wid: CGWindowID = 0
+        if _AXUIElementGetWindow(win, &wid) == .success, wid != 0 { return (wid, fullScreen) }
+        return fallbackWindowID(pid: pid, element: win).map { ($0, fullScreen) }
+    }
+
+    private func focusedWindowElement(pid: pid_t) -> AXUIElement? {
         let appEl = AXUIElementCreateApplication(pid)
         var value: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &value)
@@ -123,10 +144,7 @@ final class FocusTracker {
         var min: CFTypeRef?
         if AXUIElementCopyAttributeValue(win, kAXMinimizedAttribute as CFString, &min) == .success,
            (min as? Bool) == true { return nil }
-
-        var wid: CGWindowID = 0
-        if _AXUIElementGetWindow(win, &wid) == .success, wid != 0 { return wid }
-        return fallbackWindowID(pid: pid, element: win)
+        return win
     }
 
     /// Match by owner pid + bounds when the private call fails.
