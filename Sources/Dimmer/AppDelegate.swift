@@ -13,7 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu = StatusMenu(
             onToggle: { [weak self] in self?.applyEnabled() },
-            onIntensity: { [weak self] in self?.overlay.setIntensity(Settings.intensity) }
+            onIntensity: { [weak self] in self?.overlay.setIntensity(Settings.intensity) },
+            onDisplays: { [weak self] in self?.tracker.refresh() }
         )
 
         let nc = NotificationCenter.default

@@ -11,10 +11,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                                   target: nil, action: nil)
     private let onToggle: () -> Void
     private let onIntensity: () -> Void
+    private let onDisplays: () -> Void
+    private let displaysMenu = NSMenu()
 
-    init(onToggle: @escaping () -> Void, onIntensity: @escaping () -> Void) {
+    init(onToggle: @escaping () -> Void, onIntensity: @escaping () -> Void, onDisplays: @escaping () -> Void) {
         self.onToggle = onToggle
         self.onIntensity = onIntensity
+        self.onDisplays = onDisplays
         super.init()
 
         item.button?.image = NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: "Dimmer")
@@ -41,11 +44,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(label)
         menu.addItem(sliderItem)
         menu.addItem(.separator())
+        let displaysItem = NSMenuItem(title: "Displays", action: nil, keyEquivalent: "")
+        displaysItem.submenu = displaysMenu
+        menu.addItem(displaysItem)
         menu.addItem(loginItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         item.menu = menu
         refreshTrust()
+        rebuildDisplays()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(rebuildDisplays),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
     }
 
     func refreshTrust() { grantItem.isHidden = AXIsProcessTrusted() }
@@ -55,6 +65,41 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         enabledItem.state = Settings.enabled ? .on : .off
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         slider.doubleValue = Settings.intensity
+        rebuildDisplays()
+    }
+
+    /// One checkbox per connected display, then the focused-display-only option.
+    @objc private func rebuildDisplays() {
+        displaysMenu.removeAllItems()
+        let off = Settings.disabledDisplays
+        for screen in NSScreen.screens {
+            guard let uuid = screen.displayUUID else { continue }
+            let i = NSMenuItem(title: screen.localizedName, action: #selector(toggleDisplay(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = uuid
+            i.state = off.contains(uuid) ? .off : .on
+            displaysMenu.addItem(i)
+        }
+        displaysMenu.addItem(.separator())
+        let only = NSMenuItem(title: "Only the display with the focused window",
+                              action: #selector(toggleOnlyFocused), keyEquivalent: "")
+        only.target = self
+        only.state = Settings.onlyFocusedDisplay ? .on : .off
+        displaysMenu.addItem(only)
+    }
+
+    @objc private func toggleDisplay(_ sender: NSMenuItem) {
+        guard let uuid = sender.representedObject as? String else { return }
+        if Settings.disabledDisplays.contains(uuid) { Settings.disabledDisplays.remove(uuid) }
+        else { Settings.disabledDisplays.insert(uuid) }
+        sender.state = Settings.disabledDisplays.contains(uuid) ? .off : .on
+        onDisplays()
+    }
+
+    @objc private func toggleOnlyFocused(_ sender: NSMenuItem) {
+        Settings.onlyFocusedDisplay.toggle()
+        sender.state = Settings.onlyFocusedDisplay ? .on : .off
+        onDisplays()
     }
 
     @objc private func toggleEnabled() {

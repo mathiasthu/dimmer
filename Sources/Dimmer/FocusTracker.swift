@@ -96,6 +96,8 @@ final class FocusTracker {
 
     private func update() {
         guard isRunning else { return }
+        let front = NSWorkspace.shared.frontmostApplication
+        log.debug("update front=\(front?.localizedName ?? "-", privacy: .public) pid=\(front?.processIdentifier ?? 0, privacy: .public) observed=\(self.observedPID, privacy: .public)")
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != getpid(),
               let id = focusedWindowID(pid: app.processIdentifier),
@@ -103,14 +105,18 @@ final class FocusTracker {
             overlay.hide()
             return
         }
-        overlay.show(below: id)
+        // Only look up the window's display when "focused display only" is on.
+        overlay.show(below: id, focusedDisplay: Settings.onlyFocusedDisplay ? Displays.uuid(ofWindow: id) : nil)
     }
 
     private func focusedWindowID(pid: pid_t) -> CGWindowID? {
         let appEl = AXUIElementCreateApplication(pid)
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let err = AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &value)
+        guard err == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+            log.debug("no focused window pid=\(pid, privacy: .public) err=\(err.rawValue, privacy: .public)")
+            return nil
+        }
         let win = value as! AXUIElement
 
         // Minimized windows are not on screen; nothing to preserve.

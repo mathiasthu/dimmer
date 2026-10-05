@@ -1,4 +1,7 @@
 import AppKit
+import os
+
+let log = Logger(subsystem: "com.mathiass.dimmer", category: "dim")
 
 /// The overlay covers every window behind the focused one. As a normal window it
 /// would count as a snapping target, so macOS stops snapping dragged or resized
@@ -10,15 +13,22 @@ private final class OverlayWindow: NSWindow {
 
 /// One borderless black window per screen. Its alpha is the dim intensity;
 /// it is ordered directly beneath the focused window in global z-order.
+/// Each overlay fades in and out on its own, so single displays can be skipped.
 final class OverlayController {
-    private var windows: [NSWindow] = []
-    private var visible = false
+    private final class Overlay {
+        let window: NSWindow
+        let displayUUID: String?
+        var dimmed = false
+        init(window: NSWindow, displayUUID: String?) { self.window = window; self.displayUUID = displayUUID }
+    }
 
-    var windowNumbers: Set<Int> { Set(windows.map { $0.windowNumber }) }
+    private var overlays: [Overlay] = []
+
+    var windowNumbers: Set<Int> { Set(overlays.map { $0.window.windowNumber }) }
 
     func rebuild() {
-        windows.forEach { $0.orderOut(nil); $0.close() }
-        windows = NSScreen.screens.map { screen in
+        overlays.forEach { $0.window.orderOut(nil); $0.window.close() }
+        overlays = NSScreen.screens.map { screen in
             let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless,
                              backing: .buffered, defer: false)
             w.setFrame(screen.frame, display: false)
@@ -30,43 +40,62 @@ final class OverlayController {
             w.isReleasedWhenClosed = false
             w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
             w.alphaValue = 0
-            return w
+            return Overlay(window: w, displayUUID: screen.displayUUID)
         }
-        visible = false
     }
 
     func setIntensity(_ value: Double) {
-        guard visible else { return }
-        windows.forEach { $0.alphaValue = value }
+        overlays.filter(\.dimmed).forEach { $0.window.alphaValue = value }
     }
 
-    /// Put the sheet directly below `windowID` and fade in if needed.
-    func show(below windowID: CGWindowID) {
-        for w in windows {
-            w.order(.below, relativeTo: Int(windowID))
+    /// Whether this display should be dimmed right now. `focusedDisplay` is only
+    /// supplied when "focused display only" is on; if it couldn't be resolved
+    /// (nil), every enabled display dims rather than none.
+    private func wantsDim(_ o: Overlay, focusedDisplay: String?) -> Bool {
+        guard let uuid = o.displayUUID, !Settings.disabledDisplays.contains(uuid) else { return false }
+        if Settings.onlyFocusedDisplay, let focused = focusedDisplay { return uuid == focused }
+        return true
+    }
+
+    /// Put the sheets directly below `windowID`, fading in or out per display.
+    func show(below windowID: CGWindowID, focusedDisplay: String? = nil) {
+        for o in overlays {
+            if wantsDim(o, focusedDisplay: focusedDisplay) {
+                o.window.order(.below, relativeTo: Int(windowID))
+                if !o.dimmed {
+                    o.dimmed = true
+                    fade(o, to: Settings.intensity)
+                }
+            } else {
+                dimOff(o, animated: true)
+            }
         }
-        guard !visible else { return }
-        visible = true
-        fade(to: Settings.intensity)
+        log.debug("show below \(windowID, privacy: .public) dimmed=\(self.overlays.map { $0.dimmed }, privacy: .public) onActiveSpace=\(self.overlays.map { $0.window.isOnActiveSpace }, privacy: .public) isVisible=\(self.overlays.map { $0.window.isVisible }, privacy: .public)")
     }
 
     func hide(animated: Bool = true) {
-        guard visible || windows.contains(where: { $0.alphaValue > 0 }) else { return }
-        visible = false
+        log.debug("hide animated=\(animated, privacy: .public)")
+        overlays.forEach { dimOff($0, animated: animated) }
+    }
+
+    private func dimOff(_ o: Overlay, animated: Bool) {
+        guard o.dimmed || o.window.alphaValue > 0 || o.window.isVisible else { return }
+        o.dimmed = false
         if animated {
-            fade(to: 0) { [weak self] in
-                guard let self, !self.visible else { return }
-                self.windows.forEach { $0.orderOut(nil) }
+            fade(o, to: 0) { [weak o] in
+                guard let o, !o.dimmed else { return }
+                o.window.orderOut(nil)
             }
         } else {
-            windows.forEach { $0.alphaValue = 0; $0.orderOut(nil) }
+            o.window.alphaValue = 0
+            o.window.orderOut(nil)
         }
     }
 
-    private func fade(to alpha: Double, completion: (() -> Void)? = nil) {
+    private func fade(_ o: Overlay, to alpha: Double, completion: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.15
-            windows.forEach { $0.animator().alphaValue = alpha }
+            o.window.animator().alphaValue = alpha
         }, completionHandler: completion)
     }
 }

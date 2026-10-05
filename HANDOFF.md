@@ -1,5 +1,8 @@
 # Dimmer HANDOFF
 
+## State (2026-10-05, v1.1.0)
+Added per-display dimming (see section below). Everything under the 2026-10-04 state still applies.
+
 ## State (2026-10-04)
 v1 written and built. Menu bar agent (LSUIElement, `com.mathiass.dimmer`), one black overlay window per screen ordered directly beneath the focused window via `order(.below, relativeTo:)`. Focus tracked by NSWorkspace notifications plus one AXObserver on the frontmost app; updates coalesced to one per runloop turn; fades via NSAnimationContext (0.15s). Settings in UserDefaults: enabled, intensity (0.10-0.80, default 0.35). Launch at login via SMAppService, default off.
 
@@ -33,3 +36,15 @@ Files: `Sources/Dimmer/{main,AppDelegate,OverlayController,FocusTracker,StatusMe
 - `scripts/build-app.sh` now builds a universal (arm64 + x86_64) binary and writes `dist/Dimmer.zip` (~66 KB) for GitHub Releases. Release: `gh release create vX.Y.Z dist/Dimmer.zip`.
 - Not notarized (no Apple Developer ID). README tells users to use Open Anyway or `xattr -dr com.apple.quarantine`. Notarization would need a paid developer account.
 - Reinstalling the ad-hoc build over ~/Applications/Dimmer.app may drop the Accessibility grant.
+
+## Per-display dimming (2026-10-05, v1.1.0, not yet released or live-tested)
+- Status menu has a "Displays" submenu: one checkbox per connected display (`NSScreen.localizedName`, default all on) and "Only the display with the focused window" (default off). Rebuilt on menu open and on `didChangeScreenParametersNotification`; toggles re-run the tracker update, no relaunch.
+- Unchecked displays are stored in UserDefaults (`disabledDisplays`) as display UUIDs (`CGDisplayCreateUUIDFromDisplayID`), so new displays dim by default and the choice survives replug and reboot. `onlyFocusedDisplay` is a Bool.
+- Screen detection (`Displays.swift`): only when the option is on, `CGWindowListCopyWindowInfo(.optionIncludingWindow, id)` gives the window's bounds in CG coordinates (top-left origin, primary display); each `NSScreen.frame` is flipped with the primary display's height and the screen with the largest intersection wins. If the display can't be resolved, every checked display dims instead of none.
+- `OverlayController` now fades each overlay on its own (`Overlay` wrapper with `dimmed` flag) instead of one shared `visible` flag. `rebuild()` path for plug/unplug is unchanged.
+- Verified: `scripts/build-app.sh` succeeds with no Swift warnings (only the two known linker search-path warnings). Standalone geometry check with ARZOPA (0,0,2048x1152) and Built-in (158,-1169,1800x1169): built-in's CG frame is y=1152..2321, a window at y=1191 resolves to Built-in, one at y=100 to ARZOPA, a window straddling both goes to the larger overlap.
+- NOT verified: the app was not launched or installed (Mathias is using it; reinstalling drops the Accessibility grant). Menu behaviour, per-display fades and unplug/replug are untested live.
+
+## Incident 2026-10-04: dimming stopped (root cause unconfirmed)
+Dimming stopped working on Desktop 1 and did not follow focus after minimizing. A window-list probe showed the overlays ordered out and never shown again, although TCC showed Accessibility granted. After Mathias re-granted Accessibility and relaunched (build with debug logging), it worked again. Suspect: a stale Accessibility grant after an ad-hoc-signed reinstall. Not confirmed.
+- The os.Logger debug logging (`log` in OverlayController.swift, calls in FocusTracker and OverlayController) is intentional and stays in the release. If it recurs: `log stream --level debug --predicate 'subsystem == "com.mathiass.dimmer"'`.

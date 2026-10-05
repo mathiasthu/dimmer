@@ -19,4 +19,16 @@ enum Settings {
         }
         set { d.set(min(max(newValue, minIntensity), maxIntensity), forKey: "intensity") }
     }
+
+    /// UUIDs of displays the user switched off. Unknown displays dim by default.
+    static var disabledDisplays: Set<String> {
+        get { Set(d.stringArray(forKey: "disabledDisplays") ?? []) }
+        set { d.set(Array(newValue).sorted(), forKey: "disabledDisplays") }
+    }
+
+    /// Dim only the display that holds the focused window.
+    static var onlyFocusedDisplay: Bool {
+        get { d.bool(forKey: "onlyFocusedDisplay") }
+        set { d.set(newValue, forKey: "onlyFocusedDisplay") }
+    }
 }

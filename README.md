@@ -35,6 +35,7 @@ It runs on events instead of a loop. Dimmer sleeps until macOS tells it that foc
 
 - Dims everything behind the focused window on every display, with a 0.15 s fade.
 - Follows focus across apps, Spaces and windows of the same app.
+- Choose which displays get dimmed, or dim only the display that holds the focused window, so a second screen can stay bright.
 - Intensity slider in the menu bar, from 10% to 80%, applied live.
 - Fades out when no window has focus, so an empty desktop never goes dark.
 - Launch at login toggle, off by default.
