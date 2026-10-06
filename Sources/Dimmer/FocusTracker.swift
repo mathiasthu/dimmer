@@ -17,6 +17,10 @@ final class FocusTracker {
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
     private var pending = false
+    /// Last display resolved for a focused window. CG reports no bounds for a
+    /// window while it animates into or out of full screen; it stays on the
+    /// same display, so its last known display stands in.
+    private var lastDisplay: (window: CGWindowID, uuid: String)?
     private(set) var isRunning = false
 
     private static let axNotes: [String] = [
@@ -100,16 +104,63 @@ final class FocusTracker {
         log.debug("update front=\(front?.localizedName ?? "-", privacy: .public) pid=\(front?.processIdentifier ?? 0, privacy: .public) observed=\(self.observedPID, privacy: .public)")
         guard let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != getpid(),
-              let id = focusedWindowID(pid: app.processIdentifier),
-              !overlay.windowNumbers.contains(Int(id)) else {
+              let win = focusedWindow(pid: app.processIdentifier),
+              !overlay.windowNumbers.contains(Int(win.id)) else {
             overlay.hide()
             return
         }
-        // Only look up the window's display when "focused display only" is on.
-        overlay.show(below: id, focusedDisplay: Settings.onlyFocusedDisplay ? Displays.uuid(ofWindow: id) : nil)
+        // Resolved on every update, not only when "focused display only" is on or
+        // the window is full screen: the window has to be seen on its display
+        // before it goes full screen, or the transition has no display to skip.
+        var display = Displays.uuid(ofWindow: win.id)
+        if let display {
+            lastDisplay = (win.id, display)
+        } else if let last = lastDisplay, last.window == win.id {
+            log.debug("display of \(win.id, privacy: .public) unresolved, using last known")
+            display = last.uuid
+        }
+        if win.fullScreen && display == nil {
+            // Can't tell which display is full screen; never risk blacking it out.
+            log.debug("full-screen window \(win.id, privacy: .public) on unknown display")
+            overlay.hide()
+            return
+        }
+        overlay.show(below: win.id, above: windowAbove(win.id, pid: app.processIdentifier),
+                     focusedDisplay: Settings.onlyFocusedDisplay ? display : nil,
+                     skipDisplay: win.fullScreen ? display : nil)
     }
 
-    private func focusedWindowID(pid: pid_t) -> CGWindowID? {
+    /// With cmd-tab the app activates before the window server raises its
+    /// windows, so the focused window can still sit under the previous app's.
+    /// Returns the topmost other-app window above it, if any: the overlay goes
+    /// above that one, and the pending raise then lifts the focused app over it.
+    private func windowAbove(_ id: CGWindowID, pid: pid_t) -> CGWindowID? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements], id) as? [[String: Any]]
+        else { return nil }
+        let own = overlay.windowNumbers
+        for info in list {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner != pid, owner != getpid(),
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let n = info[kCGWindowNumber as String] as? Int, !own.contains(n) else { continue }
+            return CGWindowID(n)
+        }
+        return nil
+    }
+
+    private func focusedWindow(pid: pid_t) -> (id: CGWindowID, fullScreen: Bool)? {
+        guard let win = focusedWindowElement(pid: pid) else { return nil }
+        // "AXFullScreen" has no public constant but is set on full-screen windows.
+        var fs: CFTypeRef?
+        let fullScreen = AXUIElementCopyAttributeValue(win, "AXFullScreen" as CFString, &fs) == .success
+            && (fs as? Bool) == true
+
+        var wid: CGWindowID = 0
+        if _AXUIElementGetWindow(win, &wid) == .success, wid != 0 { return (wid, fullScreen) }
+        return fallbackWindowID(pid: pid, element: win).map { ($0, fullScreen) }
+    }
+
+    private func focusedWindowElement(pid: pid_t) -> AXUIElement? {
         let appEl = AXUIElementCreateApplication(pid)
         var value: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &value)
@@ -123,10 +174,7 @@ final class FocusTracker {
         var min: CFTypeRef?
         if AXUIElementCopyAttributeValue(win, kAXMinimizedAttribute as CFString, &min) == .success,
            (min as? Bool) == true { return nil }
-
-        var wid: CGWindowID = 0
-        if _AXUIElementGetWindow(win, &wid) == .success, wid != 0 { return wid }
-        return fallbackWindowID(pid: pid, element: win)
+        return win
     }
 
     /// Match by owner pid + bounds when the private call fails.

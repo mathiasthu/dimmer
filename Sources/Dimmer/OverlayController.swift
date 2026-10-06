@@ -38,7 +38,10 @@ final class OverlayController {
             w.ignoresMouseEvents = true
             w.level = .normal
             w.isReleasedWhenClosed = false
-            w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+            // No .fullScreenAuxiliary: a full-screen Space holds one window that
+            // fills the display, so there is nothing to dim there. Joining it let
+            // the sheet land on top of the full-screen window and black it out.
+            w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
             w.alphaValue = 0
             return Overlay(window: w, displayUUID: screen.displayUUID)
         }
@@ -50,18 +53,26 @@ final class OverlayController {
 
     /// Whether this display should be dimmed right now. `focusedDisplay` is only
     /// supplied when "focused display only" is on; if it couldn't be resolved
-    /// (nil), every enabled display dims rather than none.
-    private func wantsDim(_ o: Overlay, focusedDisplay: String?) -> Bool {
-        guard let uuid = o.displayUUID, !Settings.disabledDisplays.contains(uuid) else { return false }
+    /// (nil), every enabled display dims rather than none. `skipDisplay` is the
+    /// display of a full-screen focused window, which is never dimmed.
+    private func wantsDim(_ o: Overlay, focusedDisplay: String?, skipDisplay: String?) -> Bool {
+        guard let uuid = o.displayUUID, !Settings.disabledDisplays.contains(uuid), uuid != skipDisplay else { return false }
         if Settings.onlyFocusedDisplay, let focused = focusedDisplay { return uuid == focused }
         return true
     }
 
     /// Put the sheets directly below `windowID`, fading in or out per display.
-    func show(below windowID: CGWindowID, focusedDisplay: String? = nil) {
+    /// `above` is another app's window still on top of `windowID` while its raise
+    /// is pending; the sheets go above it so they end up just below the focused app.
+    func show(below windowID: CGWindowID, above: CGWindowID? = nil,
+              focusedDisplay: String? = nil, skipDisplay: String? = nil) {
         for o in overlays {
-            if wantsDim(o, focusedDisplay: focusedDisplay) {
-                o.window.order(.below, relativeTo: Int(windowID))
+            if wantsDim(o, focusedDisplay: focusedDisplay, skipDisplay: skipDisplay) {
+                if let above {
+                    o.window.order(.above, relativeTo: Int(above))
+                } else {
+                    o.window.order(.below, relativeTo: Int(windowID))
+                }
                 if !o.dimmed {
                     o.dimmed = true
                     fade(o, to: Settings.intensity)
@@ -70,7 +81,7 @@ final class OverlayController {
                 dimOff(o, animated: true)
             }
         }
-        log.debug("show below \(windowID, privacy: .public) dimmed=\(self.overlays.map { $0.dimmed }, privacy: .public) onActiveSpace=\(self.overlays.map { $0.window.isOnActiveSpace }, privacy: .public) isVisible=\(self.overlays.map { $0.window.isVisible }, privacy: .public)")
+        log.debug("show below \(windowID, privacy: .public) above=\(above.map { Int($0) } ?? 0, privacy: .public) dimmed=\(self.overlays.map { $0.dimmed }, privacy: .public) onActiveSpace=\(self.overlays.map { $0.window.isOnActiveSpace }, privacy: .public) isVisible=\(self.overlays.map { $0.window.isVisible }, privacy: .public)")
     }
 
     func hide(animated: Bool = true) {
