@@ -18,3 +18,7 @@ Dimmer is a macOS menu bar app (Swift, plain AppKit) that dims everything except
 ## Releasing
 
 Bump `CFBundleShortVersionString` and `CFBundleVersion` in `scripts/Info.plist`, build on the Mac, push, then run `gh release create vX.Y.Z dist/Dimmer.zip`. Releases can't be built from a cloud session.
+
+## Project notes (moved from ~/CLAUDE.md on 2026-10-08)
+
+Swift/AppKit. Lightweight HazeOver replacement (menu bar, dims everything below the focused window). Event-driven, no timers; idle 0.0% CPU / ~15 MB vs HazeOver ~10% CPU / 80 MB measured 2026-10-04. Public GitHub `mathiasthu/dimmer` (MIT, README links Luxvps). Releases via `scripts/build-app.sh` then `gh release create vX.Y.Z dist/Dimmer.zip`. Installed at `~/Applications/Dimmer.app`. Ad-hoc signed, so the Accessibility grant may need re-granting after each rebuild. No launchd or login item.
